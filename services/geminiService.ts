@@ -3,7 +3,8 @@ import { GoogleGenAI } from "@google/genai";
 import { LogTemplate } from "../types";
 
 export const organizeInterviewNotes = async (text: string, template: LogTemplate): Promise<string> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+  // Create a new GoogleGenAI instance right before making an API call to ensure it uses the most up-to-date key.
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const systemInstructions = {
     [LogTemplate.PROFESSIONAL]: "이 노트를 전문적인 비즈니스 면담 일지 형식으로 정리하세요. 포함할 내용: 면담 제목, 날짜, 참석자, 주요 논의 사항, 결정 사항, 향후 액션 아이템.",
@@ -39,13 +40,20 @@ export const organizeInterviewNotes = async (text: string, template: LogTemplate
       model: 'gemini-3-flash-preview',
       contents: prompt,
       config: {
-        temperature: 0.5, // 가독성과 일관성을 위해 온도를 약간 낮춤
+        temperature: 0.5,
       }
     });
 
+    // Access .text property directly (not a method).
     return response.text || "내용을 정리하는 데 실패했습니다.";
-  } catch (error) {
+  } catch (error: any) {
     console.error("Gemini API Error:", error);
+    
+    // Reset key selection if entity not found (per Veo/Gemini 3 guidelines).
+    if (error?.message?.includes("Requested entity was not found") || error?.message?.includes("API key")) {
+      throw new Error("API_KEY_ERROR");
+    }
+    
     throw new Error("노트를 정리할 수 없습니다. 연결 상태를 확인하거나 잠시 후 다시 시도해주세요.");
   }
 };

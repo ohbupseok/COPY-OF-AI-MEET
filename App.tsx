@@ -4,14 +4,16 @@ import {
   ClipboardCopy, 
   Trash2, 
   FileText, 
-  Settings, 
   History, 
   Plus, 
   Sparkles,
   ChevronRight,
   Download,
   CheckCircle,
-  RefreshCw
+  RefreshCw,
+  Key,
+  ExternalLink,
+  ShieldCheck
 } from 'lucide-react';
 import { LogTemplate, InterviewLog } from './types';
 import { organizeInterviewNotes } from './services/geminiService';
@@ -19,7 +21,20 @@ import Button from './components/Button';
 
 const STORAGE_KEY = 'interview_logs_history';
 
+// Define AIStudio interface to resolve type mismatch and use it in Window augmentation.
+interface AIStudio {
+  hasSelectedApiKey: () => Promise<boolean>;
+  openSelectKey: () => Promise<void>;
+}
+
+declare global {
+  interface Window {
+    readonly aistudio: AIStudio;
+  }
+}
+
 const App: React.FC = () => {
+  const [isKeySelected, setIsKeySelected] = useState<boolean | null>(null);
   const [inputText, setInputText] = useState('');
   const [organizedContent, setOrganizedContent] = useState('');
   const [template, setTemplate] = useState<LogTemplate>(LogTemplate.PROFESSIONAL);
@@ -27,6 +42,25 @@ const App: React.FC = () => {
   const [history, setHistory] = useState<InterviewLog[]>([]);
   const [selectedLogId, setSelectedLogId] = useState<string | null>(null);
   const [showCopyToast, setShowCopyToast] = useState(false);
+
+  // Check for API Key on mount
+  useEffect(() => {
+    const checkKey = async () => {
+      try {
+        const hasKey = await window.aistudio.hasSelectedApiKey();
+        setIsKeySelected(hasKey);
+      } catch (e) {
+        setIsKeySelected(false);
+      }
+    };
+    checkKey();
+  }, []);
+
+  const handleOpenKeySelector = async () => {
+    await window.aistudio.openSelectKey();
+    // Proceed to app immediately after triggering selection to avoid race condition.
+    setIsKeySelected(true); 
+  };
 
   // Load history
   useEffect(() => {
@@ -40,14 +74,12 @@ const App: React.FC = () => {
     }
   }, []);
 
-  // Save history
   const saveToHistory = useCallback((newLog: InterviewLog) => {
-    const updated = [newLog, ...history].slice(0, 20); // Keep last 20
+    const updated = [newLog, ...history].slice(0, 20);
     setHistory(updated);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
   }, [history]);
 
-  // Unified "New Log" function
   const handleNewLog = useCallback(() => {
     setInputText('');
     setOrganizedContent('');
@@ -74,8 +106,13 @@ const App: React.FC = () => {
       
       saveToHistory(newLog);
       setSelectedLogId(newLog.id);
-    } catch (error) {
-      alert(error instanceof Error ? error.message : "오류가 발생했습니다.");
+    } catch (error: any) {
+      if (error.message === "API_KEY_ERROR") {
+        setIsKeySelected(false);
+        alert("선택된 API 키에 문제가 있습니다. 다시 선택해주세요.");
+      } else {
+        alert(error instanceof Error ? error.message : "오류가 발생했습니다.");
+      }
     } finally {
       setIsProcessing(false);
     }
@@ -127,6 +164,71 @@ const App: React.FC = () => {
     }
   };
 
+  // Render Setup Gate
+  if (isKeySelected === false) {
+    return (
+      <div className="min-h-screen bg-slate-900 flex items-center justify-center p-6 relative overflow-hidden">
+        {/* Abstract Background Orbs */}
+        <div className="absolute top-0 -left-20 w-96 h-96 bg-blue-600/20 rounded-full blur-[120px]"></div>
+        <div className="absolute bottom-0 -right-20 w-96 h-96 bg-indigo-600/20 rounded-full blur-[120px]"></div>
+        
+        <div className="max-w-md w-full bg-white rounded-[2.5rem] p-10 shadow-2xl relative z-10 border border-white/20 animate-in zoom-in-95 duration-500">
+          <div className="w-20 h-20 bg-blue-600 rounded-3xl flex items-center justify-center mb-8 mx-auto shadow-xl shadow-blue-500/30 rotate-3">
+            <Sparkles className="text-white w-10 h-10" />
+          </div>
+          
+          <h1 className="text-3xl font-black text-slate-900 text-center mb-4 tracking-tight">
+            스마트 면담일지 <span className="text-blue-600">AI</span>
+          </h1>
+          <p className="text-slate-500 text-center mb-10 leading-relaxed font-medium">
+            두서없이 작성한 메모를 AI가 깔끔한 보고서로 변환해드립니다.<br/>
+            시작하려면 개인 API 키를 선택해주세요.
+          </p>
+
+          <div className="space-y-4">
+            <Button 
+              onClick={handleOpenKeySelector}
+              className="w-full h-14 rounded-2xl text-lg font-bold shadow-lg shadow-blue-600/20 transition-transform active:scale-[0.98]"
+            >
+              <Key className="w-5 h-5 mr-3" /> API 키 선택하기
+            </Button>
+            
+            <a 
+              href="https://ai.google.dev/gemini-api/docs/billing" 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="flex items-center justify-center gap-2 text-sm text-slate-400 font-semibold hover:text-blue-500 transition-colors py-2"
+            >
+              <ExternalLink className="w-4 h-4" /> 결제 및 API 키 안내 가이드
+            </a>
+          </div>
+
+          <div className="mt-12 pt-8 border-t border-slate-100 flex items-center justify-center gap-6">
+            <div className="flex flex-col items-center gap-1">
+              <ShieldCheck className="w-5 h-5 text-green-500" />
+              <span className="text-[10px] font-bold text-slate-400 uppercase">보안 유지</span>
+            </div>
+            <div className="flex flex-col items-center gap-1">
+              <RefreshCw className="w-5 h-5 text-blue-500" />
+              <span className="text-[10px] font-bold text-slate-400 uppercase">실시간 정리</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Render Loader while checking key
+  if (isKeySelected === null) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center">
+        <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mb-4"></div>
+        <p className="text-slate-400 font-bold animate-pulse uppercase tracking-widest text-xs">초기화 중...</p>
+      </div>
+    );
+  }
+
+  // Main App Content
   return (
     <div className="min-h-screen flex flex-col md:flex-row bg-gray-50 text-gray-900">
       {/* Sidebar - History */}
@@ -188,7 +290,19 @@ const App: React.FC = () => {
           )}
         </div>
 
-        <div className="p-4 border-t border-gray-100">
+        <div className="p-4 border-t border-gray-100 space-y-3">
+          <div 
+            onClick={handleOpenKeySelector}
+            className="flex items-center gap-3 p-3 rounded-xl bg-slate-50 border border-slate-100 cursor-pointer hover:bg-slate-100 transition-colors"
+          >
+            <div className="p-2 bg-white rounded-lg shadow-sm">
+              <Key className="w-4 h-4 text-blue-600" />
+            </div>
+            <div className="flex-1">
+              <p className="text-[10px] font-bold text-slate-400 uppercase leading-none mb-1">API Status</p>
+              <p className="text-xs font-bold text-slate-700">키 설정됨</p>
+            </div>
+          </div>
           <div className="bg-gradient-to-br from-blue-500 to-indigo-600 rounded-2xl p-4 text-white shadow-lg shadow-blue-200/50">
             <p className="text-xs font-medium opacity-80 mb-1">AI 팁</p>
             <p className="text-sm font-semibold mb-3 leading-snug">
